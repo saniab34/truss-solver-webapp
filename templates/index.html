@@ -1,4 +1,3 @@
-<!-- index.html -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -7,83 +6,99 @@
     <style>
         body {
             font-family: Arial, sans-serif;
-            background-color: #121212;
-            color: #ffffff;
-            margin: 0;
-            padding: 2rem;
+            background-color: #1e1e1e;
+            color: #fff;
+            padding: 20px;
+            transition: background-color 0.3s, color 0.3s;
         }
         .container {
-            max-width: 600px;
+            max-width: 800px;
             margin: auto;
-            background-color: #1e1e1e;
-            padding: 2rem;
-            border-radius: 12px;
-            box-shadow: 0 0 10px rgba(255, 255, 255, 0.1);
         }
-        h2 {
-            text-align: center;
-            margin-bottom: 1.5rem;
-        }
-        label, textarea, input {
+        input, textarea, select, button {
             display: block;
+            margin: 10px 0;
+            padding: 10px;
             width: 100%;
-            margin: 1rem 0;
+            background: #2a2a2a;
+            color: #fff;
+            border: 1px solid #444;
+            border-radius: 5px;
+        }
+        textarea {
+            height: 100px;
         }
         button {
-            width: 100%;
-            padding: 1rem;
-            border: none;
-            border-radius: 8px;
-            background-color: #4CAF50;
-            color: white;
-            font-size: 1rem;
             cursor: pointer;
+            background-color: #007BFF;
+            border: none;
+            transition: background-color 0.3s;
         }
         button:hover {
-            background-color: #45a049;
+            background-color: #0056b3;
         }
-        .toggle {
-            text-align: right;
-            margin-bottom: 1rem;
+        .toggle-btn {
+            background: #444;
+            margin-bottom: 20px;
+            width: auto;
+        }
+        .section {
+            margin-bottom: 30px;
+        }
+        .input-type-selector {
+            margin-bottom: 10px;
         }
     </style>
 </head>
 <body>
     <div class="container">
-        <div class="toggle">
-            <button onclick="toggleMode()">Toggle Dark/Light Mode</button>
-        </div>
-        <h2>Truss Solver Input</h2>
+        <button class="toggle-btn" onclick="toggleDarkMode()">🌙 Toggle Dark Mode</button>
+
+        <h2>Truss Solver</h2>
         <form method="POST" action="/solve" enctype="multipart/form-data">
-            <label>Upload or Enter Nodes:</label>
-            <input type="file" name="nodes">
-            <textarea name="nodes_text" rows="4" placeholder="Enter nodes CSV content here..."></textarea>
 
-            <label>Upload or Enter Elements:</label>
-            <input type="file" name="elements">
-            <textarea name="elements_text" rows="4" placeholder="Enter elements CSV content here..."></textarea>
+            {% for label in ['Nodes', 'Elements', 'UBC', 'FBC'] %}
+            <div class="section">
+                <label><strong>{{ label }}</strong></label>
+                <select onchange="toggleInput(this, '{{ label|lower }}')" class="input-type-selector">
+                    <option value="file">Upload File</option>
+                    <option value="manual">Manual Input</option>
+                </select>
 
-            <label>Upload or Enter UBC:</label>
-            <input type="file" name="ubc">
-            <textarea name="ubc_text" rows="4" placeholder="Enter UBC CSV content here..."></textarea>
-
-            <label>Upload or Enter FBC:</label>
-            <input type="file" name="fbc">
-            <textarea name="fbc_text" rows="4" placeholder="Enter FBC CSV content here..."></textarea>
+                <div id="{{ label|lower }}-file">
+                    <input type="file" name="{{ label|lower }}">
+                </div>
+                <div id="{{ label|lower }}-manual" style="display:none;">
+                    <textarea name="{{ label|lower }}_manual" placeholder="Enter {{ label }} data manually (CSV format)"></textarea>
+                </div>
+            </div>
+            {% endfor %}
 
             <button type="submit">Solve</button>
         </form>
     </div>
 
     <script>
-        function toggleMode() {
-            const body = document.body;
-            if (body.style.backgroundColor === 'white') {
-                body.style.backgroundColor = '#121212';
-                body.style.color = '#ffffff';
+        function toggleInput(select, id) {
+            const fileInput = document.getElementById(`${id}-file`);
+            const manualInput = document.getElementById(`${id}-manual`);
+            if (select.value === 'file') {
+                fileInput.style.display = 'block';
+                manualInput.style.display = 'none';
             } else {
-                body.style.backgroundColor = 'white';
-                body.style.color = 'black';
+                fileInput.style.display = 'none';
+                manualInput.style.display = 'block';
+            }
+        }
+
+        function toggleDarkMode() {
+            document.body.classList.toggle("light");
+            if (document.body.classList.contains("light")) {
+                document.body.style.backgroundColor = "#f4f4f4";
+                document.body.style.color = "#111";
+            } else {
+                document.body.style.backgroundColor = "#1e1e1e";
+                document.body.style.color = "#fff";
             }
         }
     </script>
