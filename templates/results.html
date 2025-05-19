@@ -1,0 +1,14 @@
+
+<!DOCTYPE html>
+<html>
+<head><title>Results</title></head>
+<body>
+    <h2>Analysis Results</h2>
+    <a href="{{ url_for('download_file', folder=folder, filename=result_csv) }}">Download CSV</a><br>
+    <a href="{{ url_for('download_file', folder=folder, filename=zip_file) }}">Download All (ZIP)</a><br><br>
+    <h3>Undeformed Truss</h3>
+    <img src="{{ url_for('static', filename=folder + '/' + undeformed_img) }}" width="500"><br>
+    <h3>Deformed Truss</h3>
+    <img src="{{ url_for('static', filename=folder + '/' + deformed_img) }}" width="500"><br>
+</body>
+</html>
