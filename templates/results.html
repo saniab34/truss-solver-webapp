@@ -2,122 +2,49 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Truss Solver Results</title>
+    <title>Analysis Results</title>
     <style>
-        :root {
-            --bg-color-light: #f4f4f4;
-            --text-color-light: #222;
-            --bg-color-dark: #121212;
-            --text-color-dark: #e0e0e0;
-            --accent-color: #007BFF;
-        }
-
         body {
-            font-family: 'Segoe UI', sans-serif;
-            background-color: var(--bg-color-light);
-            color: var(--text-color-light);
-            margin: 0;
+            font-family: Arial, sans-serif;
+            background-color: #1e1e1e;
+            color: #fff;
             padding: 20px;
-            transition: background-color 0.3s, color 0.3s;
         }
-
         .container {
-            max-width: 900px;
+            max-width: 800px;
             margin: auto;
-            background: white;
-            padding: 30px;
-            border-radius: 12px;
-            box-shadow: 0 0 20px rgba(0,0,0,0.1);
         }
-
-        a {
+        a, button {
             display: inline-block;
-            margin: 10px 0;
+            margin: 10px 10px 20px 0;
+            padding: 10px 15px;
+            background-color: #007BFF;
+            color: #fff;
             text-decoration: none;
-            color: white;
-            background-color: var(--accent-color);
-            padding: 10px 20px;
-            border-radius: 6px;
+            border-radius: 5px;
+            transition: background-color 0.3s;
         }
-
-        a:hover {
+        a:hover, button:hover {
             background-color: #0056b3;
         }
-
-        h2, h3 {
-            margin-top: 0;
-        }
-
         img {
             max-width: 100%;
-            height: auto;
-            margin: 15px 0;
-            border-radius: 8px;
-            box-shadow: 0 0 8px rgba(0,0,0,0.2);
-        }
-
-        .dark-mode {
-            background-color: var(--bg-color-dark);
-            color: var(--text-color-dark);
-        }
-
-        .dark-mode .container {
-            background: #1e1e1e;
-        }
-
-        .dark-mode a {
-            background-color: #1a73e8;
-        }
-
-        .toggle-container {
-            text-align: right;
-            margin-bottom: 10px;
-        }
-
-        .toggle-container label {
-            cursor: pointer;
-            font-size: 14px;
-        }
-
-        .toggle-container input {
-            transform: scale(1.2);
-            margin-left: 8px;
+            border: 1px solid #555;
+            margin-bottom: 20px;
         }
     </style>
 </head>
 <body>
-    <div class="toggle-container">
-        <label for="darkModeToggle">Dark Mode</label>
-        <input type="checkbox" id="darkModeToggle">
-    </div>
-
     <div class="container">
         <h2>Analysis Results</h2>
-        <a href="{{ url_for('download_file', folder=folder, filename=result_csv) }}">Download Results CSV</a><br>
-        <a href="{{ url_for('download_file', folder=folder, filename=zip_file) }}">Download All Files (ZIP)</a><br><br>
+        <a href="{{ url_for('download_file', folder=folder, filename=result_csv) }}">Download Results CSV</a>
+        <a href="{{ url_for('download_file', folder=folder, filename=zip_file) }}">Download All Files (ZIP)</a>
 
         <h3>Undeformed Truss</h3>
-        <img src="{{ url_for('static', filename=folder + '/' + undeformed_img) }}" alt="Undeformed Truss Image">
+        <img src="{{ url_for('static', filename=folder + '/' + undeformed_img) }}" alt="Undeformed Truss">
 
         <h3>Deformed Truss</h3>
-        <img src="{{ url_for('static', filename=folder + '/' + deformed_img) }}" alt="Deformed Truss Image">
+        <img src="{{ url_for('static', filename=folder + '/' + deformed_img) }}" alt="Deformed Truss">
     </div>
-
-    <script>
-        const toggle = document.getElementById('darkModeToggle');
-        const body = document.body;
-
-        toggle.addEventListener('change', () => {
-            body.classList.toggle('dark-mode', toggle.checked);
-            localStorage.setItem('darkMode', toggle.checked);
-        });
-
-        // Load mode from previous session
-        window.addEventListener('DOMContentLoaded', () => {
-            const isDark = localStorage.getItem('darkMode') === 'true';
-            toggle.checked = isDark;
-            body.classList.toggle('dark-mode', isDark);
-        });
-    </script>
 </body>
 </html>
