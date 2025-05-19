@@ -1,4 +1,4 @@
-# truss_solver.py
+# solver.py
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -6,10 +6,10 @@ import os
 
 def truss_solver(nodes_file, elements_file, ubc_file, fbc_file, output_dir):
     ndof = 2
-    Nxy = pd.read_csv(nodes_file, header=None).values
-    elCon = pd.read_csv(elements_file, header=None).values
-    ubc = pd.read_csv(ubc_file, header=None).values
-    fbc = pd.read_csv(fbc_file, header=None).values
+    Nxy = pd.read_csv(nodes_file, skiprows=1, header=None).values
+    elCon = pd.read_csv(elements_file, skiprows=1, header=None).values
+    ubc = pd.read_csv(ubc_file, skiprows=1, header=None).values
+    fbc = pd.read_csv(fbc_file, skiprows=1, header=None).values
 
     A = 1
     E = 29.5e6
