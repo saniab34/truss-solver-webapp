@@ -5,23 +5,23 @@ import matplotlib.pyplot as plt
 import os
 
 def truss_solver(nodes_file, elements_file, ubc_file, fbc_file, output_dir):
-    ndof = 2
+    ndof = 2  # 2 DOFs per node for 2D truss
 
-    # Load files
-    Nxy_full = pd.read_csv(nodes_file, skiprows=1, header=None).values
-    Nxy = Nxy_full[:, 1:3]  # Extract only X and Y (ignore Node IDs)
-
+    # Load data
+    Nxy_raw = pd.read_csv(nodes_file, skiprows=1, header=None).values
+    Nxy = Nxy_raw[:, 1:3]  # Use only x and y coordinates (ignore node ID)
     elCon = pd.read_csv(elements_file, skiprows=1, header=None).values
     ubc = pd.read_csv(ubc_file, skiprows=1, header=None).values
     fbc = pd.read_csv(fbc_file, skiprows=1, header=None).values
 
-    numNd = Nxy.shape[0]
-    numEl = elCon.shape[0]
     A = 1
     E = 29.5e6
 
-    # Validate element node indices
-    max_node_index = int(np.max(elCon))
+    numEl = elCon.shape[0]
+    numNd = Nxy.shape[0]
+
+    # ✅ Validate that all elements refer to valid node indices
+    max_node_index = int(np.max(elCon[:, :2]))
     if max_node_index > numNd:
         raise ValueError(f"Element file refers to node {max_node_index}, but only {numNd} nodes are defined.")
 
@@ -31,7 +31,7 @@ def truss_solver(nodes_file, elements_file, ubc_file, fbc_file, output_dir):
     def elemK(e):
         L, theta = L_theta(e)
         c, s = np.cos(np.radians(theta)), np.sin(np.radians(theta))
-        return (E * A / L) * np.array([
+        return (E*A/L) * np.array([
             [ c**2,  c*s, -c**2, -c*s],
             [ c*s,  s**2, -c*s, -s**2],
             [-c**2, -c*s,  c**2,  c*s],
@@ -48,7 +48,7 @@ def truss_solver(nodes_file, elements_file, ubc_file, fbc_file, output_dir):
 
     def globalK(KG, ke, e):
         n1, n2 = int(elCon[e, 0]) - 1, int(elCon[e, 1]) - 1
-        DOFs = np.r_[ndof * n1:ndof * (n1 + 1), ndof * n2:ndof * (n2 + 1)]
+        DOFs = np.r_[ndof*n1:ndof*(n1+1), ndof*n2:ndof*(n2+1)]
         for i in range(4):
             for j in range(4):
                 KG[DOFs[i], DOFs[j]] += ke[i, j]
@@ -59,31 +59,37 @@ def truss_solver(nodes_file, elements_file, ubc_file, fbc_file, output_dir):
 
     KQ = KG.copy()
 
+    # Apply displacement BCs
     for i in range(ubc.shape[0]):
-        DOF = int(ndof * (ubc[i, 0] - 1) + ubc[i, 1] - 1)
+        DOF = int(ndof*(ubc[i, 0] - 1) + ubc[i, 1] - 1)
         KG[:, DOF] = 0
         KG[DOF, :] = 0
         KG[DOF, DOF] = 1
         FG[DOF] = ubc[i, 2]
 
+    # Apply force BCs
     for i in range(fbc.shape[0]):
-        DOF = int(ndof * (fbc[i, 0] - 1) + fbc[i, 1] - 1)
+        DOF = int(ndof*(fbc[i, 0] - 1) + fbc[i, 1] - 1)
         FG[DOF] = fbc[i, 2]
 
     U = np.linalg.solve(KG, FG)
+
+    # ✅ Deformed coordinates
     defNxy = Nxy + 300 * U.reshape((numNd, ndof))
 
     sig, eps = [], []
     for e in range(numEl):
         L, theta = L_theta(e)
         n1, n2 = int(elCon[e, 0]) - 1, int(elCon[e, 1]) - 1
-        DOFs = np.r_[ndof * n1:ndof * (n1 + 1), ndof * n2:ndof * (n2 + 1)]
+        DOFs = np.r_[ndof*n1:ndof*(n1+1), ndof*n2:ndof*(n2+1)]
         c, s = np.cos(np.radians(theta)), np.sin(np.radians(theta))
         strain = (1 / L) * np.array([-c, -s, c, s]) @ U[DOFs]
         eps.append(strain)
         sig.append(E * strain)
 
+    # Axial forces
     Q = KQ @ U
+
     result_csv = os.path.join(output_dir, 'truss_results.csv')
     pd.DataFrame({
         'Element': np.arange(1, numEl + 1),
@@ -91,20 +97,21 @@ def truss_solver(nodes_file, elements_file, ubc_file, fbc_file, output_dir):
         'Strain': eps,
     }).to_csv(result_csv, index=False)
 
-    def plot_truss(xy, title, fname):
-        plt.figure()
+    def plot_truss(xy, title, fname, color):
+        plt.figure(figsize=(10, 6))
         for e in range(numEl):
             x = [xy[int(elCon[e, 0]) - 1, 0], xy[int(elCon[e, 1]) - 1, 0]]
             y = [xy[int(elCon[e, 0]) - 1, 1], xy[int(elCon[e, 1]) - 1, 1]]
-            plt.plot(x, y, 'b-o' if 'undeformed' in fname else 'r-o')
+            plt.plot(x, y, f'{color}-o')
         plt.title(title)
         plt.axis('equal')
+        plt.grid(True)
         plt.savefig(fname)
         plt.close()
 
     undeformed_img = os.path.join(output_dir, 'undeformed_truss.png')
     deformed_img = os.path.join(output_dir, 'deformed_truss.png')
-    plot_truss(Nxy, 'Undeformed Truss', undeformed_img)
-    plot_truss(defNxy, 'Deformed Truss', deformed_img)
+    plot_truss(Nxy, 'Undeformed Truss', undeformed_img, color='b')
+    plot_truss(defNxy, 'Deformed Truss', deformed_img, color='r')
 
     return result_csv, undeformed_img, deformed_img
