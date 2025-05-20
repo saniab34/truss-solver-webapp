@@ -1,17 +1,14 @@
 import os
-import uuid
-import zipfile
 import traceback
-from flask import Flask, render_template, request, send_from_directory, redirect, url_for
-from werkzeug.utils import secure_filename
+from flask import Flask, render_template, request, send_file
 from solver import truss_solver
+from werkzeug.utils import secure_filename
+import zipfile
+import uuid
 
 app = Flask(__name__)
-
 UPLOAD_FOLDER = 'uploads'
-RESULT_FOLDER = 'static/results'
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-os.makedirs(RESULT_FOLDER, exist_ok=True)
+RESULT_FOLDER = 'static'
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
 @app.route('/')
@@ -25,23 +22,17 @@ def solve():
     os.makedirs(session_dir, exist_ok=True)
 
     files = {}
+    print("Received files:", request.files)
+
     for key in ['nodes', 'elements', 'ubc', 'fbc']:
-        file = request.files.get(key)
-        manual_text = request.form.get(f"{key}_manual")
-
-        if file and file.filename:
-            filename = secure_filename(file.filename)
-            path = os.path.join(session_dir, filename)
-            file.save(path)
-        elif manual_text:
-            filename = f"{key}.csv"
-            path = os.path.join(session_dir, filename)
-            with open(path, 'w') as f:
-                f.write(manual_text.strip())
-        else:
-            return f"<h2>Error: Missing input for {key.title()}</h2>", 400
-
+        if key not in request.files:
+            return f"<h2>Missing file input:</h2> <pre>{key}</pre>", 400
+        f = request.files[key]
+        filename = secure_filename(f.filename)
+        path = os.path.join(session_dir, filename)
+        f.save(path)
         files[key] = path
+        print(f"Saved {key} to {path}")
 
     result_dir = os.path.join(RESULT_FOLDER, uid)
     os.makedirs(result_dir, exist_ok=True)
@@ -57,7 +48,7 @@ def solve():
         for file in [output_csv, undeformed_img, deformed_img]:
             zipf.write(file, arcname=os.path.basename(file))
 
-    return render_template('results.html',
+    return render_template('results.html', 
         result_csv=os.path.basename(output_csv),
         undeformed_img=os.path.basename(undeformed_img),
         deformed_img=os.path.basename(deformed_img),
@@ -67,8 +58,12 @@ def solve():
 
 @app.route('/download/<folder>/<filename>')
 def download_file(folder, filename):
-    directory = os.path.join(RESULT_FOLDER, folder)
-    return send_from_directory(directory, filename, as_attachment=True)
+    return send_file(os.path.join(RESULT_FOLDER, folder, filename), as_attachment=True)
+
+@app.errorhandler(500)
+def internal_error(e):
+    return f"<h1>Internal Server Error</h1><pre>{traceback.format_exc()}</pre>", 500
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port)
