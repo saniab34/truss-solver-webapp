@@ -1,117 +1,113 @@
-# solver.py
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-import os
+from io import BytesIO
 
-def truss_solver(nodes_file, elements_file, ubc_file, fbc_file, output_dir):
-    ndof = 2  # 2 DOFs per node for 2D truss
+def L_theta(e):
+    n1, n2, A, E = e
+    p1, p2 = Nxy[n1], Nxy[n2]
+    dx, dy = p2 - p1
+    L = np.sqrt(dx**2 + dy**2)
+    theta = np.arctan2(dy, dx)
+    return L, theta
 
-    # Load data
-    Nxy_raw = pd.read_csv(nodes_file, skiprows=1, header=None).values
-    Nxy = Nxy_raw[:, 1:3]  # Use only x and y coordinates (ignore node ID)
-    elCon = pd.read_csv(elements_file, skiprows=1, header=None).values
-    ubc = pd.read_csv(ubc_file, skiprows=1, header=None).values
-    fbc = pd.read_csv(fbc_file, skiprows=1, header=None).values
+def elemK(e):
+    L, theta = L_theta(e)
+    c, s = np.cos(theta), np.sin(theta)
+    A, E = e[2], e[3]
+    k = A * E / L
+    return k * np.array([
+        [ c*c,  c*s, -c*c, -c*s],
+        [ c*s,  s*s, -c*s, -s*s],
+        [-c*c, -c*s,  c*c,  c*s],
+        [-c*s, -s*s,  c*s,  s*s]
+    ])
 
-    A = 1
-    E = 29.5e6
+def globalK(KG, k, e):
+    n1, n2 = int(e[0]), int(e[1])
+    dof = [n1*2, n1*2+1, n2*2, n2*2+1]
+    for i in range(4):
+        for j in range(4):
+            KG[dof[i], dof[j]] += k[i, j]
+    return KG
 
-    numEl = elCon.shape[0]
-    numNd = Nxy.shape[0]
+def plot_truss(nodes, elements, title):
+    fig, ax = plt.subplots()
+    for e in elements:
+        n1, n2 = int(e[0]), int(e[1])
+        x = [nodes[n1][0], nodes[n2][0]]
+        y = [nodes[n1][1], nodes[n2][1]]
+        ax.plot(x, y, 'b-o', linewidth=1)
+    ax.set_title(title)
+    ax.axis('equal')
+    buffer = BytesIO()
+    plt.savefig(buffer, format='png')
+    buffer.seek(0)
+    plt.close()
+    return buffer
 
-    # ✅ Validate that all elements refer to valid node indices
-    max_node_index = int(np.max(elCon[:, :2]))
-    if max_node_index > numNd:
+def truss_solver(nodes_df, elements_df, fbc_df, ubc_df):
+    global Nxy
+
+    Nxy = nodes_df[['x', 'y']].values
+    numNd, ndof = Nxy.shape
+    dof = ndof * numNd
+
+    elements = elements_df[['node1', 'node2', 'A', 'E']].values
+    max_node_index = int(np.max(elements[:, :2]))
+    if max_node_index >= numNd:
         raise ValueError(f"Element file refers to node {max_node_index}, but only {numNd} nodes are defined.")
 
-    KG = np.zeros((ndof * numNd, ndof * numNd))
-    FG = np.zeros(ndof * numNd)
-
-    def elemK(e):
-        L, theta = L_theta(e)
-        c, s = np.cos(np.radians(theta)), np.sin(np.radians(theta))
-        return (E*A/L) * np.array([
-            [ c**2,  c*s, -c**2, -c*s],
-            [ c*s,  s**2, -c*s, -s**2],
-            [-c**2, -c*s,  c**2,  c*s],
-            [-c*s, -s**2,  c*s,  s**2]
-        ])
-
-    def L_theta(e):
-        n1, n2 = int(elCon[e, 0]) - 1, int(elCon[e, 1]) - 1
-        p1, p2 = Nxy[n1], Nxy[n2]
-        p12 = p2 - p1
-        L = np.linalg.norm(p12)
-        theta = np.degrees(np.arctan2(p12[1], p12[0]))
-        return L, theta
-
-    def globalK(KG, ke, e):
-        n1, n2 = int(elCon[e, 0]) - 1, int(elCon[e, 1]) - 1
-        DOFs = np.r_[ndof*n1:ndof*(n1+1), ndof*n2:ndof*(n2+1)]
-        for i in range(4):
-            for j in range(4):
-                KG[DOFs[i], DOFs[j]] += ke[i, j]
-        return KG
-
-    for e in range(numEl):
+    KG = np.zeros((dof, dof))
+    for e in elements:
         KG = globalK(KG, elemK(e), e)
 
-    KQ = KG.copy()
+    FG = np.zeros((dof,))
+    for _, row in fbc_df.iterrows():
+        node, fx, fy = int(row['node']), row['fx'], row['fy']
+        FG[node*2] = fx
+        FG[node*2+1] = fy
 
-    # Apply displacement BCs
-    for i in range(ubc.shape[0]):
-        DOF = int(ndof*(ubc[i, 0] - 1) + ubc[i, 1] - 1)
-        KG[:, DOF] = 0
-        KG[DOF, :] = 0
-        KG[DOF, DOF] = 1
-        FG[DOF] = ubc[i, 2]
+    known_dof = []
+    for _, row in ubc_df.iterrows():
+        node, ux, uy = int(row['node']), row['ux'], row['uy']
+        if ux == 0:
+            known_dof.append(node*2)
+        if uy == 0:
+            known_dof.append(node*2+1)
 
-    # Apply force BCs
-    for i in range(fbc.shape[0]):
-        DOF = int(ndof*(fbc[i, 0] - 1) + fbc[i, 1] - 1)
-        FG[DOF] = fbc[i, 2]
+    all_dof = np.arange(dof)
+    free_dof = np.setdiff1d(all_dof, known_dof)
 
-    U = np.linalg.solve(KG, FG)
+    KFF = KG[np.ix_(free_dof, free_dof)]
+    FFF = FG[free_dof]
 
-    # ✅ Deformed coordinates
-    defNxy = Nxy + 300 * U.reshape((numNd, ndof))
+    try:
+        UFF = np.linalg.solve(KFF, FFF)
+    except np.linalg.LinAlgError:
+        raise ValueError("Stiffness matrix is singular. Check constraints or element connectivity.")
 
-    sig, eps = [], []
-    for e in range(numEl):
-        L, theta = L_theta(e)
-        n1, n2 = int(elCon[e, 0]) - 1, int(elCon[e, 1]) - 1
-        DOFs = np.r_[ndof*n1:ndof*(n1+1), ndof*n2:ndof*(n2+1)]
-        c, s = np.cos(np.radians(theta)), np.sin(np.radians(theta))
-        strain = (1 / L) * np.array([-c, -s, c, s]) @ U[DOFs]
-        eps.append(strain)
-        sig.append(E * strain)
+    U = np.zeros((dof,))
+    U[free_dof] = UFF
 
-    # Axial forces
-    Q = KQ @ U
+    # ================================
+    # Deformation scaling for plotting
+    # ================================
+    U_reshaped = U.reshape((numNd, ndof))
+    max_disp = np.max(np.abs(U_reshaped))
+    model_size = np.max(np.linalg.norm(Nxy, axis=1))
+    scale_factor = 0.1 * model_size / max_disp if max_disp > 0 else 1
+    defNxy = Nxy + scale_factor * U_reshaped
 
-    result_csv = os.path.join(output_dir, 'truss_results.csv')
-    pd.DataFrame({
-        'Element': np.arange(1, numEl + 1),
-        'Stress': sig,
-        'Strain': eps,
-    }).to_csv(result_csv, index=False)
+    # Output displacements CSV
+    output = pd.DataFrame({
+        'node': range(numNd),
+        'ux': U[0::2],
+        'uy': U[1::2]
+    })
 
-    def plot_truss(xy, title, fname, color):
-        plt.figure(figsize=(10, 6))
-        for e in range(numEl):
-            x = [xy[int(elCon[e, 0]) - 1, 0], xy[int(elCon[e, 1]) - 1, 0]]
-            y = [xy[int(elCon[e, 0]) - 1, 1], xy[int(elCon[e, 1]) - 1, 1]]
-            plt.plot(x, y, f'{color}-o')
-        plt.title(title)
-        plt.axis('equal')
-        plt.grid(True)
-        plt.savefig(fname)
-        plt.close()
+    # Plot images
+    undeformed_img = plot_truss(Nxy, elements, "Undeformed Truss")
+    deformed_img = plot_truss(defNxy, elements, "Deformed Truss")
 
-    undeformed_img = os.path.join(output_dir, 'undeformed_truss.png')
-    deformed_img = os.path.join(output_dir, 'deformed_truss.png')
-    plot_truss(Nxy, 'Undeformed Truss', undeformed_img, color='b')
-    plot_truss(defNxy, 'Deformed Truss', deformed_img, color='r')
-
-    return result_csv, undeformed_img, deformed_img
+    return output, undeformed_img, deformed_img
