@@ -1,5 +1,7 @@
 import numpy as np
 import pandas as pd
+import matplotlib
+matplotlib.use('Agg')  # Ensures compatibility on headless servers
 import matplotlib.pyplot as plt
 import os
 
@@ -78,7 +80,8 @@ def truss_solver(node_file, elem_file, ubc_file, fbc_file, result_dir):
     for i, dof in enumerate(free_dofs):
         U[dof] = U_f[i]
 
-    defNxy = Nxy + 300 * U.reshape((numNd, ndof))
+    scale = 300  # Scaling factor for displacements
+    defNxy = Nxy + scale * U.reshape((numNd, ndof))
 
     # Plot undeformed truss
     plt.figure()
@@ -86,9 +89,12 @@ def truss_solver(node_file, elem_file, ubc_file, fbc_file, result_dir):
         n1, n2 = int(e[0])-1, int(e[1])-1
         x = [Nxy[n1, 0], Nxy[n2, 0]]
         y = [Nxy[n1, 1], Nxy[n2, 1]]
-        plt.plot(x, y, 'bo-')
-    undeformed_path = os.path.join(result_dir, 'undeformed.png')
+        plt.plot(x, y, 'bo-', linewidth=1)
     plt.title('Undeformed Truss')
+    plt.axis('equal')
+    plt.grid(True)
+    plt.tight_layout()
+    undeformed_path = os.path.join(result_dir, 'undeformed.png')
     plt.savefig(undeformed_path)
     plt.close()
 
@@ -98,9 +104,12 @@ def truss_solver(node_file, elem_file, ubc_file, fbc_file, result_dir):
         n1, n2 = int(e[0])-1, int(e[1])-1
         x = [defNxy[n1, 0], defNxy[n2, 0]]
         y = [defNxy[n1, 1], defNxy[n2, 1]]
-        plt.plot(x, y, 'ro-')
+        plt.plot(x, y, 'r--', linewidth=2)
+    plt.title(f'Deformed Truss (scale={scale}×)')
+    plt.axis('equal')
+    plt.grid(True)
+    plt.tight_layout()
     deformed_path = os.path.join(result_dir, 'deformed.png')
-    plt.title('Deformed Truss')
     plt.savefig(deformed_path)
     plt.close()
 
