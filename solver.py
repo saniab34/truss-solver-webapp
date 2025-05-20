@@ -3,117 +3,111 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import os
 
-def truss_solver(nodes_path, elements_path, ubc_path, fbc_path, result_dir):
-    # Load input files
-    nodes_df = pd.read_csv(nodes_path)
-    elements_df = pd.read_csv(elements_path)
-    ubc_df = pd.read_csv(ubc_path)
-    fbc_df = pd.read_csv(fbc_path)
+def elemK(e, A=1, E=200e9):
+    L, theta = L_theta(e)
+    c, s = np.cos(theta), np.sin(theta)
+    k = A * E / L
+    k_local = k * np.array([
+        [ c*c,  c*s, -c*c, -c*s],
+        [ c*s,  s*s, -c*s, -s*s],
+        [-c*c, -c*s,  c*c,  c*s],
+        [-c*s, -s*s,  c*s,  s*s]
+    ])
+    return k_local
 
-    Nxy = nodes_df[['X', 'Y']].values
-    numNd = len(Nxy)
+def L_theta(e):
+    n1, n2 = int(e[0])-1, int(e[1])-1
+    p1, p2 = Nxy[n1], Nxy[n2]
+    L = np.linalg.norm(p2 - p1)
+    theta = np.arctan2(p2[1] - p1[1], p2[0] - p1[0])
+    return L, theta
+
+def globalK(KG, k, e):
+    nd = ndof * (int(e[0])-1)
+    ni = [nd, nd+1, ndof*(int(e[1])-1), ndof*(int(e[1])-1)+1]
+    for i in range(4):
+        for j in range(4):
+            KG[ni[i], ni[j]] += k[i, j]
+    return KG
+
+def truss_solver(node_file, element_file, ubc_file, fbc_file, result_dir):
+    global ndof, Nxy
     ndof = 2
-    dof = numNd * ndof
 
-    # Check for mismatches
-    max_node_index = max(elements_df[['Node1', 'Node2']].values.flatten())
-    if max_node_index >= numNd:
+    # Read input files
+    Ndf = pd.read_csv(node_file).dropna().values
+    Edf = pd.read_csv(element_file).dropna().values
+    Udf = pd.read_csv(ubc_file).dropna().values
+    Fdf = pd.read_csv(fbc_file).dropna().values
+
+    # Node coordinates
+    Nxy = Ndf[:, 1:3]
+    numNd = Nxy.shape[0]
+
+    # Element connectivity
+    elCon = Edf[:, 1:3].astype(int)
+    max_node_index = int(np.max(elCon))
+    if max_node_index > numNd:
         raise ValueError(f"Element file refers to node {max_node_index}, but only {numNd} nodes are defined.")
 
-    # Initialize global stiffness matrix and force vector
-    KG = np.zeros((dof, dof))
-    FG = np.zeros((dof, 1))
-
-    # Assemble global stiffness matrix
-    def L_theta(e):
-        n1, n2 = int(e[0]), int(e[1])
-        p1, p2 = Nxy[n1], Nxy[n2]
-        dx, dy = p2 - p1
-        L = np.hypot(dx, dy)
-        theta = np.arctan2(dy, dx)
-        return L, theta
-
-    def elemK(e):
-        A, E = e[2], e[3]
-        L, theta = L_theta(e)
-        c, s = np.cos(theta), np.sin(theta)
-        k = (A * E / L) * np.array([
-            [ c*c,  c*s, -c*c, -c*s],
-            [ c*s,  s*s, -c*s, -s*s],
-            [-c*c, -c*s,  c*c,  c*s],
-            [-c*s, -s*s,  c*s,  s*s]
-        ])
-        return k
-
-    def globalK(KG, k, e):
-        n1, n2 = int(e[0]), int(e[1])
-        dof_map = [n1*2, n1*2+1, n2*2, n2*2+1]
-        for i in range(4):
-            for j in range(4):
-                KG[dof_map[i], dof_map[j]] += k[i, j]
-        return KG
-
-    for _, e in elements_df.iterrows():
+    # Global stiffness matrix
+    KG = np.zeros((ndof*numNd, ndof*numNd))
+    for e in elCon:
         KG = globalK(KG, elemK(e), e)
 
-    # Apply forces
-    for _, f in fbc_df.iterrows():
-        node = int(f['Node'])
-        dof_x, dof_y = node * 2, node * 2 + 1
-        FG[dof_x] += f['Fx']
-        FG[dof_y] += f['Fy']
+    # Force vector
+    FG = np.zeros((ndof*numNd,))
+    for f in Fdf:
+        node = int(f[0]) - 1
+        dof = int(f[1])
+        val = f[2]
+        FG[node*ndof + dof] = val
 
-    # Apply boundary conditions
-    fixed_dofs = []
-    for _, bc in ubc_df.iterrows():
-        node = int(bc['Node'])
-        if bc['UX'] == 0:
-            fixed_dofs.append(node * 2)
-        if bc['UY'] == 0:
-            fixed_dofs.append(node * 2 + 1)
+    # Boundary conditions
+    bc = []
+    for u in Udf:
+        node = int(u[0]) - 1
+        dof = int(u[1])
+        bc.append(node*ndof + dof)
+    bc = np.array(bc)
 
-    free_dofs = np.setdiff1d(np.arange(dof), fixed_dofs)
+    # Solve for displacements
+    free_dofs = np.setdiff1d(np.arange(ndof*numNd), bc)
+    KG_reduced = KG[np.ix_(free_dofs, free_dofs)]
+    FG_reduced = FG[free_dofs]
+    U = np.zeros((ndof*numNd,))
+    U[free_dofs] = np.linalg.solve(KG_reduced, FG_reduced)
 
-    K_ff = KG[np.ix_(free_dofs, free_dofs)]
-    F_f = FG[free_dofs]
-
-    # Solve displacements
-    try:
-        U_f = np.linalg.solve(K_ff, F_f)
-    except np.linalg.LinAlgError as e:
-        raise ValueError("Stiffness matrix is singular. Check support and element configuration.")
-
-    U = np.zeros((dof, 1))
-    U[free_dofs] = U_f.reshape(-1, 1)
-
-    # Compute deformed shape
-    defNxy = Nxy + 300 * U.reshape((numNd, ndof))
+    # Save results to CSV
+    disp = U.reshape((numNd, ndof))
+    output_csv = os.path.join(result_dir, 'displacements.csv')
+    pd.DataFrame(disp, columns=['Ux', 'Uy']).to_csv(output_csv, index=False)
 
     # Plot undeformed truss
-    plt.figure(figsize=(10, 5))
-    for _, e in elements_df.iterrows():
-        n1, n2 = int(e['Node1']), int(e['Node2'])
-        plt.plot([Nxy[n1][0], Nxy[n2][0]], [Nxy[n1][1], Nxy[n2][1]], 'bo-')
-    undeformed_img = os.path.join(result_dir, "undeformed.png")
+    undeformed_img = os.path.join(result_dir, 'undeformed.png')
+    plt.figure()
+    for e in elCon:
+        i, j = int(e[0])-1, int(e[1])-1
+        x = [Nxy[i, 0], Nxy[j, 0]]
+        y = [Nxy[i, 1], Nxy[j, 1]]
+        plt.plot(x, y, 'k-', lw=1)
     plt.title("Undeformed Truss")
+    plt.axis('equal')
     plt.savefig(undeformed_img)
     plt.close()
 
-    # Plot deformed truss
-    plt.figure(figsize=(10, 5))
-    for _, e in elements_df.iterrows():
-        n1, n2 = int(e['Node1']), int(e['Node2'])
-        plt.plot([defNxy[n1][0], defNxy[n2][0]], [defNxy[n1][1], defNxy[n2][1]], 'ro-')
-    deformed_img = os.path.join(result_dir, "deformed.png")
+    # Plot deformed truss (scaled)
+    defNxy = Nxy + 300 * disp  # 300 is a scale factor for visualization
+    deformed_img = os.path.join(result_dir, 'deformed.png')
+    plt.figure()
+    for e in elCon:
+        i, j = int(e[0])-1, int(e[1])-1
+        x = [defNxy[i, 0], defNxy[j, 0]]
+        y = [defNxy[i, 1], defNxy[j, 1]]
+        plt.plot(x, y, 'r--', lw=1)
     plt.title("Deformed Truss")
+    plt.axis('equal')
     plt.savefig(deformed_img)
     plt.close()
-
-    # Prepare output CSV with displacements
-    disp = U.reshape((numNd, ndof))
-    nodes_df['UX'] = disp[:, 0]
-    nodes_df['UY'] = disp[:, 1]
-    output_csv = os.path.join(result_dir, "output.csv")
-    nodes_df.to_csv(output_csv, index=False)
 
     return output_csv, undeformed_img, deformed_img
