@@ -1,113 +1,119 @@
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from io import BytesIO
+import os
 
-def L_theta(e):
-    n1, n2, A, E = e
-    p1, p2 = Nxy[n1], Nxy[n2]
-    dx, dy = p2 - p1
-    L = np.sqrt(dx**2 + dy**2)
-    theta = np.arctan2(dy, dx)
-    return L, theta
+def truss_solver(nodes_path, elements_path, ubc_path, fbc_path, result_dir):
+    # Load input files
+    nodes_df = pd.read_csv(nodes_path)
+    elements_df = pd.read_csv(elements_path)
+    ubc_df = pd.read_csv(ubc_path)
+    fbc_df = pd.read_csv(fbc_path)
 
-def elemK(e):
-    L, theta = L_theta(e)
-    c, s = np.cos(theta), np.sin(theta)
-    A, E = e[2], e[3]
-    k = A * E / L
-    return k * np.array([
-        [ c*c,  c*s, -c*c, -c*s],
-        [ c*s,  s*s, -c*s, -s*s],
-        [-c*c, -c*s,  c*c,  c*s],
-        [-c*s, -s*s,  c*s,  s*s]
-    ])
+    Nxy = nodes_df[['X', 'Y']].values
+    numNd = len(Nxy)
+    ndof = 2
+    dof = numNd * ndof
 
-def globalK(KG, k, e):
-    n1, n2 = int(e[0]), int(e[1])
-    dof = [n1*2, n1*2+1, n2*2, n2*2+1]
-    for i in range(4):
-        for j in range(4):
-            KG[dof[i], dof[j]] += k[i, j]
-    return KG
-
-def plot_truss(nodes, elements, title):
-    fig, ax = plt.subplots()
-    for e in elements:
-        n1, n2 = int(e[0]), int(e[1])
-        x = [nodes[n1][0], nodes[n2][0]]
-        y = [nodes[n1][1], nodes[n2][1]]
-        ax.plot(x, y, 'b-o', linewidth=1)
-    ax.set_title(title)
-    ax.axis('equal')
-    buffer = BytesIO()
-    plt.savefig(buffer, format='png')
-    buffer.seek(0)
-    plt.close()
-    return buffer
-
-def truss_solver(nodes_df, elements_df, fbc_df, ubc_df):
-    global Nxy
-
-    Nxy = nodes_df[['x', 'y']].values
-    numNd, ndof = Nxy.shape
-    dof = ndof * numNd
-
-    elements = elements_df[['node1', 'node2', 'A', 'E']].values
-    max_node_index = int(np.max(elements[:, :2]))
+    # Check for mismatches
+    max_node_index = max(elements_df[['Node1', 'Node2']].values.flatten())
     if max_node_index >= numNd:
         raise ValueError(f"Element file refers to node {max_node_index}, but only {numNd} nodes are defined.")
 
+    # Initialize global stiffness matrix and force vector
     KG = np.zeros((dof, dof))
-    for e in elements:
+    FG = np.zeros((dof, 1))
+
+    # Assemble global stiffness matrix
+    def L_theta(e):
+        n1, n2 = int(e[0]), int(e[1])
+        p1, p2 = Nxy[n1], Nxy[n2]
+        dx, dy = p2 - p1
+        L = np.hypot(dx, dy)
+        theta = np.arctan2(dy, dx)
+        return L, theta
+
+    def elemK(e):
+        A, E = e[2], e[3]
+        L, theta = L_theta(e)
+        c, s = np.cos(theta), np.sin(theta)
+        k = (A * E / L) * np.array([
+            [ c*c,  c*s, -c*c, -c*s],
+            [ c*s,  s*s, -c*s, -s*s],
+            [-c*c, -c*s,  c*c,  c*s],
+            [-c*s, -s*s,  c*s,  s*s]
+        ])
+        return k
+
+    def globalK(KG, k, e):
+        n1, n2 = int(e[0]), int(e[1])
+        dof_map = [n1*2, n1*2+1, n2*2, n2*2+1]
+        for i in range(4):
+            for j in range(4):
+                KG[dof_map[i], dof_map[j]] += k[i, j]
+        return KG
+
+    for _, e in elements_df.iterrows():
         KG = globalK(KG, elemK(e), e)
 
-    FG = np.zeros((dof,))
-    for _, row in fbc_df.iterrows():
-        node, fx, fy = int(row['node']), row['fx'], row['fy']
-        FG[node*2] = fx
-        FG[node*2+1] = fy
+    # Apply forces
+    for _, f in fbc_df.iterrows():
+        node = int(f['Node'])
+        dof_x, dof_y = node * 2, node * 2 + 1
+        FG[dof_x] += f['Fx']
+        FG[dof_y] += f['Fy']
 
-    known_dof = []
-    for _, row in ubc_df.iterrows():
-        node, ux, uy = int(row['node']), row['ux'], row['uy']
-        if ux == 0:
-            known_dof.append(node*2)
-        if uy == 0:
-            known_dof.append(node*2+1)
+    # Apply boundary conditions
+    fixed_dofs = []
+    for _, bc in ubc_df.iterrows():
+        node = int(bc['Node'])
+        if bc['UX'] == 0:
+            fixed_dofs.append(node * 2)
+        if bc['UY'] == 0:
+            fixed_dofs.append(node * 2 + 1)
 
-    all_dof = np.arange(dof)
-    free_dof = np.setdiff1d(all_dof, known_dof)
+    free_dofs = np.setdiff1d(np.arange(dof), fixed_dofs)
 
-    KFF = KG[np.ix_(free_dof, free_dof)]
-    FFF = FG[free_dof]
+    K_ff = KG[np.ix_(free_dofs, free_dofs)]
+    F_f = FG[free_dofs]
 
+    # Solve displacements
     try:
-        UFF = np.linalg.solve(KFF, FFF)
-    except np.linalg.LinAlgError:
-        raise ValueError("Stiffness matrix is singular. Check constraints or element connectivity.")
+        U_f = np.linalg.solve(K_ff, F_f)
+    except np.linalg.LinAlgError as e:
+        raise ValueError("Stiffness matrix is singular. Check support and element configuration.")
 
-    U = np.zeros((dof,))
-    U[free_dof] = UFF
+    U = np.zeros((dof, 1))
+    U[free_dofs] = U_f.reshape(-1, 1)
 
-    # ================================
-    # Deformation scaling for plotting
-    # ================================
-    U_reshaped = U.reshape((numNd, ndof))
-    max_disp = np.max(np.abs(U_reshaped))
-    model_size = np.max(np.linalg.norm(Nxy, axis=1))
-    scale_factor = 0.1 * model_size / max_disp if max_disp > 0 else 1
-    defNxy = Nxy + scale_factor * U_reshaped
+    # Compute deformed shape
+    defNxy = Nxy + 300 * U.reshape((numNd, ndof))
 
-    # Output displacements CSV
-    output = pd.DataFrame({
-        'node': range(numNd),
-        'ux': U[0::2],
-        'uy': U[1::2]
-    })
+    # Plot undeformed truss
+    plt.figure(figsize=(10, 5))
+    for _, e in elements_df.iterrows():
+        n1, n2 = int(e['Node1']), int(e['Node2'])
+        plt.plot([Nxy[n1][0], Nxy[n2][0]], [Nxy[n1][1], Nxy[n2][1]], 'bo-')
+    undeformed_img = os.path.join(result_dir, "undeformed.png")
+    plt.title("Undeformed Truss")
+    plt.savefig(undeformed_img)
+    plt.close()
 
-    # Plot images
-    undeformed_img = plot_truss(Nxy, elements, "Undeformed Truss")
-    deformed_img = plot_truss(defNxy, elements, "Deformed Truss")
+    # Plot deformed truss
+    plt.figure(figsize=(10, 5))
+    for _, e in elements_df.iterrows():
+        n1, n2 = int(e['Node1']), int(e['Node2'])
+        plt.plot([defNxy[n1][0], defNxy[n2][0]], [defNxy[n1][1], defNxy[n2][1]], 'ro-')
+    deformed_img = os.path.join(result_dir, "deformed.png")
+    plt.title("Deformed Truss")
+    plt.savefig(deformed_img)
+    plt.close()
 
-    return output, undeformed_img, deformed_img
+    # Prepare output CSV with displacements
+    disp = U.reshape((numNd, ndof))
+    nodes_df['UX'] = disp[:, 0]
+    nodes_df['UY'] = disp[:, 1]
+    output_csv = os.path.join(result_dir, "output.csv")
+    nodes_df.to_csv(output_csv, index=False)
+
+    return output_csv, undeformed_img, deformed_img
