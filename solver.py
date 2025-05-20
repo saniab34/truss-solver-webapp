@@ -6,24 +6,27 @@ import os
 
 def truss_solver(nodes_file, elements_file, ubc_file, fbc_file, output_dir):
     ndof = 2
-    Nxy = pd.read_csv(nodes_file, skiprows=1, header=None).values
+
+    # Load files
+    Nxy_full = pd.read_csv(nodes_file, skiprows=1, header=None).values
+    Nxy = Nxy_full[:, 1:3]  # Extract only X and Y (ignore Node IDs)
+
     elCon = pd.read_csv(elements_file, skiprows=1, header=None).values
     ubc = pd.read_csv(ubc_file, skiprows=1, header=None).values
     fbc = pd.read_csv(fbc_file, skiprows=1, header=None).values
 
+    numNd = Nxy.shape[0]
+    numEl = elCon.shape[0]
     A = 1
     E = 29.5e6
-    numEl = elCon.shape[0]
-    numNd = Nxy.shape[0]
-    KG = np.zeros((ndof * numNd, ndof * numNd))
-    FG = np.zeros(ndof * numNd)
 
     # Validate element node indices
     max_node_index = int(np.max(elCon))
     if max_node_index > numNd:
-        raise ValueError(
-            f"Element file refers to node {max_node_index}, but only {numNd} nodes are defined."
-        )
+        raise ValueError(f"Element file refers to node {max_node_index}, but only {numNd} nodes are defined.")
+
+    KG = np.zeros((ndof * numNd, ndof * numNd))
+    FG = np.zeros(ndof * numNd)
 
     def elemK(e):
         L, theta = L_theta(e)
@@ -37,11 +40,6 @@ def truss_solver(nodes_file, elements_file, ubc_file, fbc_file, output_dir):
 
     def L_theta(e):
         n1, n2 = int(elCon[e, 0]) - 1, int(elCon[e, 1]) - 1
-        if n1 >= len(Nxy) or n2 >= len(Nxy):
-            raise IndexError(
-                f"Element {e + 1} refers to node {max(n1 + 1, n2 + 1)}, "
-                f"but only {len(Nxy)} nodes are defined."
-            )
         p1, p2 = Nxy[n1], Nxy[n2]
         p12 = p2 - p1
         L = np.linalg.norm(p12)
@@ -91,15 +89,13 @@ def truss_solver(nodes_file, elements_file, ubc_file, fbc_file, output_dir):
         'Element': np.arange(1, numEl + 1),
         'Stress': sig,
         'Strain': eps,
-        'AxialForce': Q[:numEl]  # This line may need revision if you want member axial forces
     }).to_csv(result_csv, index=False)
 
     def plot_truss(xy, title, fname):
         plt.figure()
         for e in range(numEl):
-            n1, n2 = int(elCon[e, 0]) - 1, int(elCon[e, 1]) - 1
-            x = [xy[n1, 0], xy[n2, 0]]
-            y = [xy[n1, 1], xy[n2, 1]]
+            x = [xy[int(elCon[e, 0]) - 1, 0], xy[int(elCon[e, 1]) - 1, 0]]
+            y = [xy[int(elCon[e, 0]) - 1, 1], xy[int(elCon[e, 1]) - 1, 1]]
             plt.plot(x, y, 'b-o' if 'undeformed' in fname else 'r-o')
         plt.title(title)
         plt.axis('equal')
